@@ -1,15 +1,9 @@
-from datetime import datetime
-
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models, schemas, services
 from .database import get_db
-
-# Captured when the module is first imported. Used as a fallback timestamp
-# when a request does not carry one of its own.
-SERVICE_STARTUP_TIME = datetime.utcnow()
 
 router = APIRouter()
 
@@ -47,9 +41,12 @@ def list_products(db: Session = Depends(get_db)):
     "/products/low-stock",
     response_model=list[schemas.ProductReadWithStock],
 )
-def list_low_stock(db: Session = Depends(get_db)):
+def list_low_stock(
+    safety_margin: int = Query(0, ge=0, description="Early-warning buffer, in units."),
+    db: Session = Depends(get_db),
+):
     service = services.ProductService(db)
-    items = service.find_low_stock()
+    items = service.find_low_stock(safety_margin=safety_margin)
     return [
         schemas.ProductReadWithStock.model_validate(
             {
@@ -69,7 +66,26 @@ def list_low_stock(db: Session = Depends(get_db)):
 )
 def adjust_stock(data: schemas.StockAdjustment, db: Session = Depends(get_db)):
     service = services.StockService(db)
-    movement = service.adjust_stock(data)
-    if movement is None:
-        return Response(status_code=200)
-    return movement
+    return service.adjust_stock(data)
+
+
+@router.post(
+    "/stocks/transfers",
+    response_model=schemas.StockTransferRead,
+    status_code=201,
+)
+def create_transfer(data: schemas.StockTransferCreate, db: Session = Depends(get_db)):
+    service = services.StockService(db)
+    return service.transfer_stock(data)
+
+
+@router.get("/stocks/transfers", response_model=list[schemas.StockTransferRead])
+def list_transfers(
+    product_id: int | None = Query(None, description="Filter by product"),
+    warehouse_id: int | None = Query(
+        None, description="Filter by warehouse (matches source or destination)"
+    ),
+    db: Session = Depends(get_db),
+):
+    service = services.StockService(db)
+    return service.list_transfers(product_id=product_id, warehouse_id=warehouse_id)
