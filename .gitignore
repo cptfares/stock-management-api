@@ -3,3 +3,4 @@
 *.pyc
 .venv/
 stock.db
+.pytest_cache/
